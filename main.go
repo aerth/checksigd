@@ -8,18 +8,17 @@ https://github.com/aerth/checksigd
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
 
-	"github.com/gorilla/csrf"
 	"github.com/gorilla/mux"
 
 	"log"
 	"math/rand"
 	"net"
 	"net/http"
-	"net/http/fcgi"
+	"net/url"
 
 	"github.com/microcosm-cc/bluemonday"
 
@@ -39,26 +38,11 @@ func usage() {
 }
 
 var (
-	// ErrNoReferer is returned when a HTTPS request provides an empty Referer
-	// header.
-	ErrNoReferer = errors.New("referer not supplied")
-	// ErrBadReferer is returned when the scheme & host in the URL do not match
-	// the supplied Referer header.
-	ErrBadReferer = errors.New("referer invalid")
-	// ErrNoToken is returned if no CSRF token is supplied in the request.
-	ErrNoToken = errors.New("CSRF token not found in request")
-	// ErrBadToken is returned if the CSRF token in the request does not match
-	// the token in the session, or is otherwise malformed.
-	ErrBadToken = errors.New("CSRF token invalid")
-)
-var (
-	port       = flag.String("port", "8080", "HTTP Port to listen on")
-	debug      = flag.Bool("debug", false, "be verbose, dont switch to debug.log")
-	insecure   = flag.Bool("insecure", false, "accept insecure cookie transfer (http/80)")
-	fastcgi    = flag.Bool("fastcgi", false, "use fastcgi with nginx")
-	bind       = flag.String("bind", "127.0.0.1", "default: 127.0.0.1 - maybe 0.0.0.0 ?")
-	help       = flag.Bool("help", false, "show usage help and quit")
-	CSRF_TOKEN = []byte("")
+	port    = flag.String("port", "8080", "HTTP Port to listen on")
+	debug   = flag.Bool("debug", false, "be verbose, dont switch to debug.log")
+	fastcgi = flag.Bool("fastcgi", false, "use fastcgi with nginx")
+	bind    = flag.String("bind", "127.0.0.1", "default: 127.0.0.1 - maybe 0.0.0.0 ?")
+	help    = flag.Bool("help", false, "show usage help and quit")
 )
 
 func main() {
@@ -72,14 +56,6 @@ func main() {
 		os.Exit(2)
 	}
 
-	if os.Getenv("CSRF_TOKEN") == "" {
-		log.Println("CSRF_TOKEN not set. Using default.")
-		CSRF_TOKEN = []byte("LI80PNK1xcT01jmQBsEyxyrNCrbyyFPjPU8CKnxwmCruxNijgnyb3hXXD3p1RBc0+LIRQUUbTtis6hc6LD4I/A==")
-	} else {
-		log.Println("CSRF key OK", os.Getenv("CSRF_TOKEN"))
-		CSRF_TOKEN = []byte(os.Getenv("CSRF_TOKEN"))
-	}
-
 	//Begin Routing
 	r := mux.NewRouter()
 	r.NotFoundHandler = http.HandlerFunc(RedirectHomeHandler)
@@ -87,54 +63,24 @@ func main() {
 		Methods("GET")
 
 	r.HandleFunc("/", HashHandler).
-		Methods("POST").
-		Host("https://checksigd.herokuapp.com")
+		Methods("POST")
+	//	Host("https://checksigd.herokuapp.com")
 
 	http.Handle("/", r)
 	//End Routing
-
 	if *debug == false {
 		log.Println("[switching logs to debug.log]")
 		OpenLogFile()
 	} else {
 		log.Println("Debug on: [not using debug.log]")
 	}
-
 	log.Printf("[checksigd] live on " + getLink(*fastcgi, *bind, *port))
 	// Start Serving!
-	if *fastcgi == true {
-		listener, err := net.Listen("tcp", *bind+":"+*port)
-		if err != nil {
-			log.Fatal("Could not bind: ", err)
-		}
-		if *insecure == true {
-			log.Fatal(fcgi.Serve(listener,
-				csrf.Protect(CSRF_TOKEN,
-					csrf.HttpOnly(true),
-					csrf.Secure(false))(r)))
-		} else {
-			log.Println("info: https:// only")
-			log.Fatal(fcgi.Serve(listener,
-				csrf.Protect(CSRF_TOKEN,
-					csrf.HttpOnly(true),
-					csrf.Secure(true))(r)))
-		}
-	} else if *fastcgi == false && *insecure == true {
-		log.Fatal(http.ListenAndServe(":"+*port,
-			csrf.Protect(CSRF_TOKEN,
-				csrf.HttpOnly(true),
-				csrf.Secure(false))(r)))
-	} else if *fastcgi == false && *insecure == false {
-		log.Println("info: https:// only")
-		log.Fatal(http.ListenAndServe(":"+*port,
-			csrf.Protect(CSRF_TOKEN, csrf.HttpOnly(true),
-				csrf.Secure(true))(r)))
-	}
+	log.Fatal(http.ListenAndServe(":"+*port, r))
 
 }
 
-// HomeHandler parses the ./templates/index.html template file.
-// This returns a web page with a form, captcha, CSRF token, and the checksigd API key to send the message.
+//  checksigd blank page (tm)
 func HomeHandler(w http.ResponseWriter, r *http.Request) {
 	p := bluemonday.UGCPolicy()
 	domain := getDomain(r)
@@ -148,26 +94,72 @@ func HomeHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+type HashRequest struct {
+	url  string
+	hash string
+}
+
+// Set User Agent
+var tr = &http.Transport{
+	DisableCompression: true,
+}
+var apigun = &http.Client{
+	CheckRedirect: redirectPolicyFunc,
+	Transport:     tr,
+}
+
+func redirectPolicyFunc(req *http.Request, reqs []*http.Request) error {
+	req.Header.Add("Content-Type", "[application/json; charset=utf-8")
+	req.Header.Set("User-Agent", "checksigd/0.1")
+	return nil
+}
+
 // HashHandler parses a POST request, gets and returns the first 64 bytes.
 func HashHandler(w http.ResponseWriter, r *http.Request) {
-
 	p := bluemonday.UGCPolicy()
 	domain := getDomain(r)
-	sanit := p.Sanitize(r.URL.Path[1:])
 	log.Printf("HOME: %s /%s %s - %s - %s",
 		domain,
-		sanit,
 		r.RemoteAddr,
 		r.Host,
 		r.UserAgent())
 
+	r.ParseForm()
+
+	if r.FormValue("url") != "" {
+		w.Write([]byte("url is " + r.FormValue("url") + "..."))
+		u, err := url.Parse(r.FormValue("url"))
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		log.Println("Grabbing", u)
+		request := &http.Request{
+			Method: "GET",
+			URL:    u,
+			Header: http.Header{
+				"User-Agent": {"checksigd/0.1"},
+			},
+		}
+		resp, err := apigun.Do(request)
+		out, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+
+			log.Println(err)
+			return
+		}
+		fmt.Fprintf(w, p.Sanitize(string(out)))
+
+		return
+	}
 	// checkURL()
 	// downloadSUM() // first 64 bytes of URL body
 	// validate nospaces
 	// return SUM
 	// simple!
 
-	fmt.Fprintf(w, "yo dawg")
+	fmt.Fprintf(w, "yo dawg, you were tryin to check the hash...\n")
+
 }
 
 // RedirectHomeHandler redirects everyone home ("/") with a 301 redirect.
