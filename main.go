@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -29,6 +30,11 @@ import (
 )
 
 var version = "git"
+
+const (
+	maxbytes = 1024 // 1MiB
+	text     = "text/plain"
+)
 
 //usage shows how available flags.
 func usage() {
@@ -139,17 +145,32 @@ func redirectPolicyFunc(req *http.Request, reqs []*http.Request) error {
 
 // HashHandler parses a POST request, gets and returns the first 1024 bytes.
 func HashHandler(w http.ResponseWriter, r *http.Request) {
+
+	// Limit request to 256 bytes, good enough for a URL ( testing with 76 byte URL and its not particularly short )
+	r.Body = http.MaxBytesReader(w, r.Body, 256)
+
+	// Send the rest to /dev/null
+	log.Println(io.Copy(ioutil.Discard, r.Body))
+
+	// todo: This should be equal to the domain name advertised.
 	domain := getDomain(r)
+
+	// Log the request
 	log.Printf("HOME: %s /%s %s - %s",
 		domain,
 		r.RemoteAddr,
 		r.Host,
 		r.UserAgent())
 
+	// Parse the user's request.
 	r.ParseForm()
 
 	// Typical request:
 	// curl -d url=<http://example.com/md5.txt> https://checksigd.example.org
+	if r.FormValue("url") == "" {
+		w.Write([]byte("doing it wrong"))
+		return
+	}
 
 	if r.FormValue("url") != "" {
 
@@ -165,7 +186,7 @@ func HashHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Create http request to send
 		log.Println("Grabbing", u)
-		request := &http.Request{
+		z := &http.Request{
 			Method: "GET",
 			URL:    u,
 			Header: http.Header{
@@ -173,15 +194,21 @@ func HashHandler(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 
+		// Limit to 1MiB
+		z.Body = http.MaxBytesReader(w, z.Body, 1024)
+
 		// Send request to alien server
-		resp, err := apigun.Do(request)
+		resp, err := apigun.Do(z)
 		if err != nil {
 			log.Println(err)
 			return
 		}
 
-		// Limit response to 512 bytes
-		out := io.LimitReader(resp.Body, 512)
+		// Limit to 1MiB
+		resp.Body = http.MaxBytesReader(w, resp.Body, 1024)
+
+		// Limit our response to 1024 bytes
+		out := io.LimitReader(resp.Body, 1024)
 
 		// Copy bytes from temporary buffer to browser/curl
 		if _, err := io.Copy(w, out); err != nil {
