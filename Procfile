@@ -1,1 +1,1 @@
-web: checksigd -quiet -nolog -port=$PORT
+web: checksigd -port=$PORT
