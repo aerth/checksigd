@@ -51,6 +51,9 @@ const (
 	</body>
     </html>	
 	`
+	logolink = `<div style="text-align:center; width:100%; padding: 10px; padding-top:10vh;">
+				<a href="https://github.com/aerth/checksigd"><img alt="checksigd(1)" src="data:image/png;base64,` + logo + `" />`
+	homepage = htmlhead + logolink + htmlfoot
 )
 
 //usage shows how available flags.
@@ -135,7 +138,7 @@ func HomeHandler(w http.ResponseWriter, r *http.Request) {
 		r.Host,
 		r.UserAgent())
 
-	fmt.Fprintf(w, "%s %s %s", htmlhead, logo, htmlfoot)
+	fmt.Fprintf(w, "%s", homepage)
 
 }
 
