@@ -34,6 +34,23 @@ var version = "git"
 const (
 	maxbytes = 1024 // 1MiB
 	text     = "text/plain"
+	htmlhead = `
+	<!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style type="text/css">
+        html, body, iframe { margin: 0; padding: 0; height: 100%; }
+        iframe { display: block; width: 100%; border: none; }
+      </style>
+    <title>getsigd(1)</title>
+    <body>
+	`
+
+	htmlfoot = `
+	</body>
+    </html>	
+	`
 )
 
 //usage shows how available flags.
@@ -117,6 +134,8 @@ func HomeHandler(w http.ResponseWriter, r *http.Request) {
 		r.RemoteAddr,
 		r.Host,
 		r.UserAgent())
+
+	fmt.Fprintf(w, "%s %s %s", htmlhead, logo, htmlfoot)
 
 }
 
