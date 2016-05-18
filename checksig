@@ -1,0 +1,22 @@
+
+#!/bin/sh
+CHECKSIGD=https://checksigd.herokuapp.com
+if [ -z "$1" ]; then
+echo "checksig -h"
+echo "checksig [url of md5sum]"
+exit 1
+fi
+
+if [ "$1" == "-h" ]; then
+echo ""
+echo "more info @ https://github.com/aerth/checksigd"
+echo ""
+exit 0
+fi
+
+if [ "$1" == "-c" ]; then
+	if [ -z "$2" ]; then exit 1; fi
+echo Checking "$2" via $CHECKSIGD
+curl -d "url=$2" $CHECKSIGD
+
+fi
