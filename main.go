@@ -15,7 +15,6 @@ import (
 	"github.com/gorilla/csrf"
 	"github.com/gorilla/mux"
 
-	"html/template"
 	"log"
 	"math/rand"
 	"net"
@@ -73,9 +72,6 @@ func main() {
 		os.Exit(2)
 	}
 
-	// Sanity Check
-	SelfTest()
-
 	if os.Getenv("CSRF_TOKEN") == "" {
 		log.Println("CSRF_TOKEN not set. Using default.")
 		CSRF_TOKEN = []byte("LI80PNK1xcT01jmQBsEyxyrNCrbyyFPjPU8CKnxwmCruxNijgnyb3hXXD3p1RBc0+LIRQUUbTtis6hc6LD4I/A==")
@@ -86,10 +82,13 @@ func main() {
 
 	//Begin Routing
 	r := mux.NewRouter()
-
 	r.NotFoundHandler = http.HandlerFunc(RedirectHomeHandler)
+	r.HandleFunc("/", HomeHandler).
+		Methods("GET")
 
-	r.HandleFunc("/", HomeHandler)
+	r.HandleFunc("/", HashHandler).
+		Methods("POST").
+		Host("https://checksigd.herokuapp.com")
 
 	http.Handle("/", r)
 	//End Routing
@@ -134,24 +133,6 @@ func main() {
 
 }
 
-func SelfTest() {
-	log.Println("Starting self test...")
-
-	_, err := template.New("Index").ParseFiles("./templates/index.html")
-	if err != nil {
-		log.Println("Fatal: Template Error:", err)
-		log.Fatal("Fatal: Template Error\n\n\t\tHint: Copy ./templates and ./static from $GOPATH/src/github.com/aerth/checksigd/ to the location of your binary.")
-	}
-
-	_, err = template.New("Error").ParseFiles("./templates/error.html")
-	if err != nil {
-		log.Println("Fatal: Template Error:", err)
-		log.Fatal("Fatal: Template Error\nHint: Copy ./templates and ./static from $GOPATH/src/github.com/aerth/checksigd/ to the location of your binary.")
-	}
-
-	log.Println("Passed self test.")
-}
-
 // HomeHandler parses the ./templates/index.html template file.
 // This returns a web page with a form, captcha, CSRF token, and the checksigd API key to send the message.
 func HomeHandler(w http.ResponseWriter, r *http.Request) {
@@ -164,41 +145,29 @@ func HomeHandler(w http.ResponseWriter, r *http.Request) {
 		r.RemoteAddr,
 		r.Host,
 		r.UserAgent())
-	t, err := template.New("Index").ParseFiles("./templates/index.html")
-	if err != nil {
-		log.Println("Almost fatal: Cant load index.html template!")
-		log.Println(err)
-		fmt.Fprintf(w, "We are experiencing some technical difficulties. Please come back soon!")
-	} else {
-		data := map[string]interface{}{
-			csrf.TemplateTag: csrf.TemplateField(r),
-		}
 
-		t.ExecuteTemplate(w, "Index", data)
-
-	}
 }
 
-// CustomErrorHandler allows checksigd administrator to customize the 404 Error page
-// Using the ./templates/error.html file.
-func CustomErrorHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("visitor: 404 %s - %s at %s", r.Host, r.UserAgent(), r.RemoteAddr)
+// HashHandler parses a POST request, gets and returns the first 64 bytes.
+func HashHandler(w http.ResponseWriter, r *http.Request) {
+
 	p := bluemonday.UGCPolicy()
 	domain := getDomain(r)
 	sanit := p.Sanitize(r.URL.Path[1:])
-	log.Printf("404 on %s/%s", sanit, domain)
-	t, err := template.New("Error").ParseFiles("./templates/error.html")
-	if err == nil {
-		data := map[string]interface{}{
-			"err":            "404",
-			csrf.TemplateTag: csrf.TemplateField(r),
-		}
-		t.ExecuteTemplate(w, "Error", data)
-	} else {
-		log.Printf("template error: %s at %s", r.UserAgent(), r.RemoteAddr)
-		log.Println(err)
-		http.Redirect(w, r, "/", 301)
-	}
+	log.Printf("HOME: %s /%s %s - %s - %s",
+		domain,
+		sanit,
+		r.RemoteAddr,
+		r.Host,
+		r.UserAgent())
+
+	// checkURL()
+	// downloadSUM() // first 64 bytes of URL body
+	// validate nospaces
+	// return SUM
+	// simple!
+
+	fmt.Fprintf(w, "yo dawg")
 }
 
 // RedirectHomeHandler redirects everyone home ("/") with a 301 redirect.
