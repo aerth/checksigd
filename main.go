@@ -10,7 +10,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 
 	"github.com/gorilla/mux"
 
@@ -116,7 +116,7 @@ func redirectPolicyFunc(req *http.Request, reqs []*http.Request) error {
 
 // HashHandler parses a POST request, gets and returns the first 64 bytes.
 func HashHandler(w http.ResponseWriter, r *http.Request) {
-	p := bluemonday.UGCPolicy()
+	//	p := bluemonday.UGCPolicy()
 	domain := getDomain(r)
 	log.Printf("HOME: %s /%s %s - %s - %s",
 		domain,
@@ -127,7 +127,7 @@ func HashHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 
 	if r.FormValue("url") != "" {
-		w.Write([]byte("url is " + r.FormValue("url") + "..."))
+		//	w.Write([]byte("url is " + r.FormValue("url") + "..."))
 		u, err := url.Parse(r.FormValue("url"))
 		if err != nil {
 			log.Println(err)
@@ -142,13 +142,13 @@ func HashHandler(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 		resp, err := apigun.Do(request)
-		out, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-
+		out := io.LimitReader(resp.Body, 1024)
+		if _, err := io.Copy(w, out); err != nil {
 			log.Println(err)
 			return
 		}
-		fmt.Fprintf(w, p.Sanitize(string(out)))
+
+		//fmt.Fprintf(w, "%q", p.Sanitize(string(out)))
 
 		return
 	}
