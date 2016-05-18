@@ -1,3 +1,5 @@
+// checksigd is a API server that returns file integrity signatures.
+
 /*
 
 Copyright (c) 2016 aerth@sdf.org
@@ -11,47 +13,63 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/gorilla/mux"
 
 	"log"
 	"math/rand"
-	"net"
 	"net/http"
 	"net/url"
 
 	"github.com/microcosm-cc/bluemonday"
 
 	"os"
-	"strings"
 	"time"
 )
 
+var version = "git"
+
 //usage shows how available flags.
 func usage() {
+	fmt.Println("checksigd - version " + version)
 	fmt.Println("\nusage: checksigd [flags]")
 	fmt.Println("\nflags:")
-	time.Sleep(1000 * time.Millisecond)
 	flag.PrintDefaults()
-	time.Sleep(1000 * time.Millisecond)
-	fmt.Println("\nExample: checksigd -insecure -port 8080 -fastcgi -debug")
+	fmt.Println("\nExample: checksigd -debug")
 }
 
 var (
-	port    = flag.String("port", "8080", "HTTP Port to listen on")
-	debug   = flag.Bool("debug", false, "be verbose, dont switch to debug.log")
-	fastcgi = flag.Bool("fastcgi", false, "use fastcgi with nginx")
-	bind    = flag.String("bind", "127.0.0.1", "default: 127.0.0.1 - maybe 0.0.0.0 ?")
-	help    = flag.Bool("help", false, "show usage help and quit")
+	port  = flag.String("port", "8080", "HTTP Port to listen on")
+	debug = flag.Bool("debug", false, "be verbose, dont switch to debug.log")
+	//	fastcgi = flag.Bool("fastcgi", false, "use fastcgi with nginx")
+	bind = flag.String("bind", "127.0.0.1", "default: 127.0.0.1 - maybe 0.0.0.0 ?")
+	help = flag.Bool("help", false, "show usage help and quit")
 )
 
+// Return the domain the user requested us at
+func getDomain(r *http.Request) string {
+	type Domains map[string]http.Handler
+	hostparts := strings.Split(r.Host, ":")
+	requesthost := hostparts[0]
+	return requesthost
+}
+
+//getLink returns the requested bind:port or http://bind:port string
+func getLink(bind string, port string) string {
+
+	link := "http://" + bind + ":" + port
+	return link
+
+}
 func main() {
 
 	// Set flags from command line
 	flag.Usage = usage
 	flag.Parse()
 	args := flag.Args()
-	if len(args) > 1 {
+	// Count extra non -flags
+	if len(args) > 0 {
 		usage()
 		os.Exit(2)
 	}
@@ -68,13 +86,15 @@ func main() {
 
 	http.Handle("/", r)
 	//End Routing
+
+	log.Printf("[checksigd version " + version + "] live on " + getLink(*bind, *port))
+
 	if *debug == false {
 		log.Println("[switching logs to debug.log]")
 		OpenLogFile()
 	} else {
 		log.Println("Debug on: [not using debug.log]")
 	}
-	log.Printf("[checksigd] live on " + getLink(*fastcgi, *bind, *port))
 	// Start Serving!
 	log.Fatal(http.ListenAndServe(":"+*port, r))
 
@@ -94,31 +114,33 @@ func HomeHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+// not implemented yet
 type HashRequest struct {
 	url  string
 	hash string
 }
 
-// Set User Agent
+// Transport
 var tr = &http.Transport{
 	DisableCompression: true,
 }
+
+// Client
 var apigun = &http.Client{
 	CheckRedirect: redirectPolicyFunc,
 	Transport:     tr,
 }
 
+// Keep useragent on redirect
 func redirectPolicyFunc(req *http.Request, reqs []*http.Request) error {
-	req.Header.Add("Content-Type", "[application/json; charset=utf-8")
 	req.Header.Set("User-Agent", "checksigd/0.1")
 	return nil
 }
 
-// HashHandler parses a POST request, gets and returns the first 64 bytes.
+// HashHandler parses a POST request, gets and returns the first 1024 bytes.
 func HashHandler(w http.ResponseWriter, r *http.Request) {
-	//	p := bluemonday.UGCPolicy()
 	domain := getDomain(r)
-	log.Printf("HOME: %s /%s %s - %s - %s",
+	log.Printf("HOME: %s /%s %s - %s",
 		domain,
 		r.RemoteAddr,
 		r.Host,
@@ -126,13 +148,22 @@ func HashHandler(w http.ResponseWriter, r *http.Request) {
 
 	r.ParseForm()
 
+	// Typical request:
+	// curl -d url=<http://example.com/md5.txt> https://checksigd.example.org
+
 	if r.FormValue("url") != "" {
-		//	w.Write([]byte("url is " + r.FormValue("url") + "..."))
+
 		u, err := url.Parse(r.FormValue("url"))
 		if err != nil {
 			log.Println(err)
 			return
 		}
+
+		// todo:
+		// log.Println("Asking peers")
+		// askpeers(r.FormValue("url"))
+
+		// Create http request to send
 		log.Println("Grabbing", u)
 		request := &http.Request{
 			Method: "GET",
@@ -141,22 +172,28 @@ func HashHandler(w http.ResponseWriter, r *http.Request) {
 				"User-Agent": {"checksigd/0.1"},
 			},
 		}
+
+		// Send request to alien server
 		resp, err := apigun.Do(request)
-		out := io.LimitReader(resp.Body, 1024)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		// Limit response to 512 bytes
+		out := io.LimitReader(resp.Body, 512)
+
+		// Copy bytes from temporary buffer to browser/curl
 		if _, err := io.Copy(w, out); err != nil {
 			log.Println(err)
 			return
 		}
 
-		//fmt.Fprintf(w, "%q", p.Sanitize(string(out)))
-
+		// If we made it this far, we ran into no problems.
+		log.Println("Gave signature.")
 		return
+
 	}
-	// checkURL()
-	// downloadSUM() // first 64 bytes of URL body
-	// validate nospaces
-	// return SUM
-	// simple!
 
 	fmt.Fprintf(w, "yo dawg, you were tryin to check the hash...\n")
 
@@ -168,55 +205,12 @@ func RedirectHomeHandler(rw http.ResponseWriter, r *http.Request) {
 	domain := getDomain(r)
 	sanit := p.Sanitize(r.URL.Path[1:])
 	log.Printf("RDR: %s /%s %s - %s - %s", domain, sanit, r.RemoteAddr, r.Host, r.UserAgent())
-	//log.Printf("RDR %s %s", lol, domain)
 	http.Redirect(rw, r, "/", 301)
 
 }
 
-func getDomain(r *http.Request) string {
-	type Domains map[string]http.Handler
-	hostparts := strings.Split(r.Host, ":")
-	requesthost := hostparts[0]
-	return requesthost
-}
-func getSubdomain(r *http.Request) string {
-	type Subdomains map[string]http.Handler
-	hostparts := strings.Split(r.Host, ":")
-	requesthost := hostparts[0]
-	if net.ParseIP(requesthost) == nil {
-		log.Println("Requested domain: " + requesthost)
-		domainParts := strings.Split(requesthost, ".")
-		log.Println("Subdomain:" + domainParts[0])
-		if len(domainParts) > 2 {
-			if domainParts[0] != "127" {
-				return domainParts[0]
-			}
-		}
-	}
-	return ""
-}
-
-// serverSingle just shows one file.
-func serveSingle(pattern string, filename string) {
-	http.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, filename)
-	})
-}
-
-// Key Generator
 func init() {
 	rand.Seed(time.Now().UnixNano())
-}
-
-var runes = []rune("ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890123456789012345678901234567890")
-
-//GenerateAPIKey does API Key Generation with the given runes.
-func GenerateAPIKey(n int) string {
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = runes[rand.Intn(len(runes))]
-	}
-	return string(b)
 }
 
 //OpenLogFile switches the log engine to a file, rather than stdout
@@ -228,15 +222,4 @@ func OpenLogFile() {
 		os.Exit(1)
 	}
 	log.SetOutput(f)
-}
-
-//getLink returns the requested bind:port or http://bind:port string
-func getLink(fastcgi bool, bind string, port string) string {
-	if fastcgi == true {
-		link := bind + ":" + port
-		return link
-	} else {
-		link := "http://" + bind + ":" + port
-		return link
-	}
 }
