@@ -170,7 +170,7 @@ func redirectPolicyFunc(req *http.Request, reqs []*http.Request) error {
 
 // HashHandler parses a POST request, gets and returns the first 1024 bytes.
 func HashHandler(w http.ResponseWriter, r *http.Request) {
-	rbody := http.MaxBytesReader(w, r.Body, maxurlsize)
+
 	domain := getDomain(r)
 
 	// Send the rest to /dev/null
@@ -179,12 +179,11 @@ func HashHandler(w http.ResponseWriter, r *http.Request) {
 	// todo: This should be equal to the domain name advertised.
 
 	// Log the request
-	log.Printf("POST: %s /%s %s - %s\n%s",
+	log.Printf("POST: %s /%s %s - %s",
 		domain,
 		r.RemoteAddr,
 		r.Host,
-		r.UserAgent(),
-		rbody)
+		r.UserAgent())
 
 	// Parse the user's request.
 	r.ParseForm()
@@ -206,6 +205,7 @@ func HashHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println(len(sigurl.String()), " > ", maxurlsize)
 		return
 	}
+
 	// todo:
 	// log.Println("Asking peers")
 	// askpeers(r.FormValue("url"))
@@ -230,6 +230,16 @@ func HashHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Log header
+	// log.Println(resp.Header)
+
+	// Check content-type header var for text/plain
+	if http.CanonicalHeaderKey(resp.Header.Get("content-type")) != text {
+		log.Printf("Not giving it! %s != %s", http.CanonicalHeaderKey(resp.Header.Get("content-type")), text)
+		return
+	} else {
+		log.Println("Looks good!")
+	}
 	// Limit grab into mem
 	resp.Body = http.MaxBytesReader(w, resp.Body, maxbytes)
 
